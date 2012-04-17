@@ -1,0 +1,123 @@
+Sinteza Texturilor
+
+
+
+Deadline: 29.04.2012
+
+Responsabili: Răzvan Dobre și Adi Muraru
+
+Scopul temei îl reprezintă implementarea unui algoritm de sinteză a texturilor pe arhitectura CELL BE.
+
+Texturi
+
+Textura este un model regulat(căramizile unui zid, fibrele unui material textil) sau neregulat(pietrișul, iarba) care acoperă o suprafață și care, la o privire superficială, poate fi perceput unitar de către om. Sinteza texturilor este un proces prin care, pe baza unui algoritm, se construiește o imagine digitală de mari dimensiuni dintr-o imagine digitală de mici dimensiuni ("mostra"), acoperită cu o anumita textură. Scopul acestei sinteze este de a crea o nouă imagine care
+îndeplinește următoarele cerințe:
+Dimensiunea outputului este prestabilită de către utilizator
+Outputul trebuie să fie similar, pe cât posibil cu "mostra"
+Outputul trebuie să nu aibă artefacte vizibile: blocuri, "petice" adiacente care nu se potrivesc, granița de imbinare a unor bucati.
+Outputul nu trebuie sa fie repetitiv
+
+
+Algoritm
+Image Quilting: Algoritmii la nivel de "petic" creează o noua textură copiind bucăți (petice) din imaginea mostră, de la anumite offset-uri și (între)țesându-le în imaginea rezultat. Acești algoritmi sunt mai eficienți decât cei la nivel de pixel și mai rapizi.
+Algoritmul(prezentat in continuare) pe care va trebui voi să-l implementați este o ușoară variațiune a algoritmului de sinteză (nu vi se cere și algoritmul de transfer) a texturilor prezentat aici, programând pe arhitectura IBM CELL.
+O abordare naivă (si cu rezultate nu foarte rele) ar fi să luam pur si simplu petice de la offset-uri random din mostră si să le punem cap la cap în imaginea rezultat.
+
+Granița de eroare minimă
+O îmbunătățire a variantei naive e ca peticele să aibă o extensie, fâșie de suprapunere (overlap). În interiorul fâșiei de suprapunere/imbinare, se va “tăia” o cale de eroare minimă, pentru ca granița de îmbinare dintre două petice adiacente să nu fie (foarte) vizibila.
+Vă propunem calculul acestei granițe de eroare minimă așa cum este descris în articolul citat mai sus. Sunteți liberi, însă, să folosiți altă metodă pe care o credeți (mai) potrivită.
+Fie B1 și B2 două blocuri (petice) adiacente, cu granița verticală. Ele se suprapun în fâșiile de suprapunere Fs1 si Fs2. Suprafața de eroare, e definită astfel:
+e = (Fs1 – Fs2)2
+Fiind vorba de granița verticală, vom parcurge e plecând de pe prima (cea mai de sus, in articol numerotata cu 1) linie către ultima(N). Se calculează eroarea cumulativă minimă, pentru toate căile E din e, pentru i=2..N, j în limitele lățimii fâșiei de suprapunere:
+Ei,j = ei,j + min(Ei-1,j-1 , Ei-1,j , Ei-1,j+1 )
+Când se ajunge la final, se face drumul înapoi de la poziția (N,j), pentru care E(N,j) e minim. Aceea e calea de eroare minima. Ce e în stânga ei va proveni de la petecul din stânga, iar ce e în dreapta de la petecul din dreapta.
+Analog se procedează în cazul unei granițe orizontale.
+Pentru calculul (Fs1 – Fs2)2, trebuie să aveți în vedere că diferența e pentru fiecare pixel (și că un pixel este reprezentat pe 3 octeți – RGB). Deci pentru fiecare pixel diferența va fi de fapt:
+(r1 - r2)2+(g1 - g2)2+(b1 - b2)2
+unde r,g si b sunt componentele de roșu, verde și respectiv albastru pentru cei doi pixeli care se “suprapun”.
+ 
+ Selecția peticelor vecine
+
+ De asemenea, procedeul dă rezultate și mai bune dacă peticele nu sunt alese random, ci astfel încât diferențele între zonele de suprapunere ale peticelor adiacente să fie cât mai mici. Se poate folosi formula pentru diferența a 2 pixeli suprapuși prezentată mai sus (sau puteți alege alta). Pentru a obține diferența dintre două fâșii de suprapunere, aceste diferențe trebuie cumulate (și eventual mediate la numarul de pixeli din suprafață).
+
+ Implementarea pe IBM CELL
+ Împărțire imagine
+ Imaginea rezultat va fi împarțită pe orizontală, în 8 (numarul de SPU-uri) zone egale. Fiecare SPU se va ocupa de o astfel de zonă. Dăndu-se dimensiunile imaginii rezultat, dimensiunile unui petic pătratic (făra părțile de suprapunere) vor fi egale cu lățimea unei astfel de zone. În interiorul unei zone, pe verticală, vor intra 4-8 petice (fără parțile de suprapunere).
+
+
+ În interiorul zonelor, peticele vecine vor fi alese astfel încât fâșiile de suprapunere să difere cât mai puțin (vezi Selecția peticelor vecine). Aici puteți aborda în mai multe feluri, vă sugerăm două din ele:
+ fixați un numar de nt teste; verificați întotdeauna nt petice și din ele îl alegeți pe cel cu diferența minimă
+ vă fixați o toleranță și testați mai multe petice, până găsiți ceva care convine (diferența e sub toleranță); puteți fixa un numar maxim de încercări, astfel încat să vă opriți fie când ați găsit un petic “potrivit”, fie cănd s-a atins numărul maxim de încercări.
+ Peticele trebuie “prevazute” cu fâșii de suprapunere (vezi Selecția peticelor vecine), atât orizontale cât și verticale. Peticele care vor fi pe marginile imaginii rezultat (e vorba de imaginea întreagă, nu de zone) nu vor avea fâșie de suprapunere pe partea/părțile unde nu au vecini (peticele vizate sunt asadar cele din primul și ultimul rand și cele din prima și ultima coloană).
+ Fâșiile de suprapunere verticale pot fi egale cu cele orizontale, dar nu e obligatoriu. Trebuie să determinați experimental dimensiunile ideale, în funcție de dimensiunile peticelor și de textura pe care o sintetizați (este posibil ca dimensiunile să difere de la textură la textură).
+
+ Granițele verticale de eroare minimă vor fi calculate de fiecare SPU, în interiorul zonei de care se ocupă.
+ Granițele orizontale de eroare minima (care se vor calcula de-a lungul granitelor intre zone) vor fi calculate de PPU dupa asamblarea imaginii finale.
+ Două petice adiacente pe orizontală (deci din doua zone diferite) NU vor fi testate in prealabil, astfel încât sa difere cât mai puțin in fâșia de suprapunere. De aceea trebuie să “tunați” dimensiunea fâșiei de suprapunere, pentru a obține un rezultat mulțumitor (evident, mai slab decât în cazul în care vecinii n-ar fi aleși random).
+
+ Detalii implementare
+
+
+ Implementarea va folosi paradigma replicated workers: ppu-ul este master iar spu-urile vor fi workeri. Workerii vor fi cei care vor cere de taskuri. In acest context taskul va insemna alegerea random a unui petic din imaginea originala, determinarea peticului cel mai bun si atasarea fasiei la imaginea finala.
+
+ Dupa ce toate SPU-urile și-au completat zona, începe etapa a doua, cea în care se "netezesc" granițele orizontale. La aceasta etapa participă doar PPU-ul.
+
+ Pentru implementare trebuie îndeplinite următoarele cerințe:
+ Comunicația se face prin mailbox-uri.
+ Se vor utiliza event-uri sau semnale (nu busy waiting!).
+ Transferul efectiv al peticelor se va face prin DMA.
+ BONUS: Veți folosi operațiile vectoriale (SIMD) pentru calculul cailor de eroare minimă, a diferențelor între suprafețele de suprapunere, și a altor calcule care permit așa ceva.
+
+ Exemple imagini de intrare
+ Imaginile de intrare și ieșire trebuie să fie în format PPM.
+ Exemple de imagini de intare în format PPM, aici. (sau orice “input image” de la link1 sau link2, însa va trebui să le transformați în format PPM – puteți folosi aplicatia GIMP).
+ Date de intrare
+ ./program fis_in fis_out zoom nr_bucati_dim1 nr_bucati_dim2 banda_de_suprapunere_dim1 banda_de_suprapunere_dim2 
+ fis_in - fișier de intrare
+ fis_out - fișier de ieșire
+ zoom  - de câte ori imaginea de ieșire va fi mai mare decât imaginea de intrare
+ nr_bucati_dim1 - numărul de petice pe una din dimensiuni
+ nr_bucati_dim2 - numărul de bucăți pe cealaltă dimensiune, unde imaginea totală de ieșire va fi compusă din nr_bucati_dim1 x nr_bucati_dim2 bucati (cu mențiunea că nr_bucati_dim2 se va împarți la cele 8 spu-uri)
+ benzile de suprapunere se vor da prin numere de pixeli. Exemplu: banda_de_suprapunere_dim1 = 10px, banda_de_suprapunere_dim1 = 20px
+
+
+ Pe exemplul din desenul de mai jos:
+ ./program fisier_in fisier_out 2 3 8 10 10 
+ Testare
+
+ Testarea temei se va face pe doua fișiere de intrare (dintre cele recomandate in enunt), cele pe care ați obtinut voi cele mai bune rezultate.
+
+ Arhiva temei, de maxim 10MB,  trebuie să cuprindă :
+
+ sursele
+ makefile
+ make - compileaza sursele
+ make run - ruleaza programul pentru fisierele de imagine din arhiva (minim 5 fisiere de imagine diferite). Imaginile de intrare se vor gasi un folderul input, imaginile de iesire se vor gasi in folderul output (initial gol).
+ README - lipsa acestuia se penalizeaza cu 1 punct din 10.
+ imagini de test in limita dimensiunii de 10MB
+
+ README-ul:
+
+ Trebuie să precizați  valorile parametrilor pentru care ați obtinut rezultatele (zooizonm, modul de impartire - ortala sau verticala, numărul de petice pe cele două dimensiuni, dimensiunile benzilor de suprapunere pe orizontală si verticală, număr de candidați) pentru fiecare fișier de intrare (pot fi și valori diferite pentru cele două fișiere).
+ Nu uitați să puneți și modul de rulare în cazul în care ați ales altceva decât ce scrie în secțiunea "date de intrare".
+ Notare
+ Notarea temei se va face dupa urmatoarele criterii:
+
+ - 50p - imaginea finala se compune doar din petice random fara calculul unei benzi de suprapunere orizontale sau verticale
+
+ - 20p - calculul benzii de suprapunere verticale, rezultatul trebuie sa se regaseasca in imagininea finala
+
+ - 20p - calculul benzii de suprapunere orizontale, rezultatul trebuie sa se regaseasca in imagininea finala
+
+ - 10p - readme, implementare, comentarii, usurinta un corectarea temei
+
+ - 20p bonus pentru calculul benzilor de suprapunere folosind SIMD atat pe PPU (10p) cat si pe SPU (10p)
+
+ Resurse utile
+ Algoritm texturi
+ Cell BE Kickstart
+ Cell Mailboxes
+ Cell C/C++ language extensions (descriere amanuntita a tipurilor de date și funcțiilor pentru calcul)
+ Cell BE Programming Tutorial
+
+
