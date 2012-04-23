@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <libspe2.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <string.h>
 
 #define SPU_THREADS 8
@@ -21,15 +22,14 @@ typedef struct {
 } thread_arg_t;
 
 struct pixel {
-	int red;
-	int green;
-	int blue;
+	char red;
+	char green;
+	char blue;
 };
 
 void *ppu_pthread_function(void *thread_arg) {
 	thread_arg_t *arg = (thread_arg_t *) thread_arg;
 	unsigned int entry = SPE_DEFAULT_ENTRY;
-
 	if (spe_context_run(arg->spe, &entry, 0, (void *) arg->cellno, 
 				(void *) arg->data, NULL) < 0) {
 		perror ("Failed running context");
@@ -40,7 +40,7 @@ void *ppu_pthread_function(void *thread_arg) {
 }
 
 void read_from_file(FILE *fin, struct pixel **a, long *width, long *height,
-	int *max_color)
+		int *max_color)
 {
 	char line[256];
 	char *numbers, *tok;
@@ -89,9 +89,15 @@ void read_from_file(FILE *fin, struct pixel **a, long *width, long *height,
 	}
 }
 
+/* Return a random path from the pool of patches */
+struct pixel *get_random_patch(struct pixel**pool, int pool_size)
+{
+	int pos = rand() % pool_size;
+	return pool[pos];
+}
 
 struct pixel **build_pool_patches(int count, struct pixel *img, struct pixel **pool,
-	int patch_w, int patch_h, int img_w, int img_h)
+		int patch_w, int patch_h, int img_w, int img_h)
 {
 	printf("Building pool patches, h %d, w%d\n", patch_h, patch_w);
 	int i, j, k;
@@ -106,20 +112,20 @@ struct pixel **build_pool_patches(int count, struct pixel *img, struct pixel **p
 			free(pool);
 			return NULL;
 		}
-		printf("Successfuly allocated patch %d\n", i);
+		//printf("Successfuly allocated patch %d\n", i);
 		rand_x = rand() % (img_h - patch_h);
-		rand_y = rand() % (img_w - patch_w);
-		printf("Patch starts at %ld, %ld\n", rand_x, rand_y);
+		rand_y = rand() % (img_w - patch_w);		
+		//printf("Patch starts at %ld, %ld\n", rand_x, rand_y);
 		for (j = 0; j < patch_h; j++) {
 			for (k = 0; k < patch_w; k++) {
 				pos_img = (rand_x + j) * img_w + rand_y + k;
 				pos_patch = j * patch_w + k;
-				printf("Copy pixel from img[%d] to patch[%d]\n",
-					pos_img, pos_patch);
+				//printf("Copy pixel from img[%d] to patch[%d]\n",
+				//	pos_img, pos_patch);
 				pool[i][pos_patch] = img[pos_img];
 			}
 		}
-	}
+	}	
 	return pool;
 }
 
@@ -130,11 +136,16 @@ int main(int argc, char **argv)
 	spe_context_ptr_t ctxs[SPU_THREADS];
 	pthread_t threads[SPU_THREADS];
 	thread_arg_t arg[SPU_THREADS];
+	spe_event_unit_t pevents[SPU_THREADS],
+			 events_received[SPU_THREADS];
+	spe_event_handler_ptr_t event_handler;
+	event_handler = spe_event_handler_create();
+
 	int zoom, rows, columns, overlap_vert, overlap_oriz, pos_patch;
 	long height, width, i, j, k, petic_x, petic_y;
-	int max_color, patch_w, patch_h;
+	int max_color, patch_w, patch_h, pool_size;
 	struct pixel *a = NULL, *result = NULL;
-	struct pixel **patches = NULL;
+	struct pixel **patches __attribute__ ((aligned(16))) = NULL;
 
 	/* Store the arguments */
 	if (argc < 8)
@@ -154,15 +165,15 @@ int main(int argc, char **argv)
 		perror("Error while opening input file for reading");
 	read_from_file(fin, &a, &width, &height, &max_color);
 	printf("Access some pixel: %d, %d, %d\n", a[183].red, a[183].green,
-		a[183].blue);
+			a[183].blue);
 	printf("Successfuly read from file\n");
 
 	/* Create a pool of several random patches */
 	patch_w = width * zoom / columns;
 	patch_h = height * zoom / rows;
-	patches = build_pool_patches(rows * columns, a, patches, patch_w, patch_h,
-		width, height);
-
+	pool_size = rows * columns;
+	patches = build_pool_patches(pool_size, a, patches, patch_w, patch_h,
+			width, height);
 	if (patches == NULL) {
 		printf("Patches e null\n");
 		return;
@@ -170,7 +181,7 @@ int main(int argc, char **argv)
 	/* Print a patch from pool */
 	FILE *fout = fopen("23_out.ppm", "w");
 	fprintf(fout, "P3\n");
-	fprintf(fout, "%ld %ld\n%d\n", patch_w, patch_h, max_color);
+	fprintf(fout, "%d %d\n%d\n", patch_w, patch_h, max_color);
 	struct pixel *patch = patches[0];
 	for (i = 0; i < patch_h; i++) {
 		for (j = 0; j < patch_w; j++) {
@@ -184,7 +195,7 @@ int main(int argc, char **argv)
 	/* Create several SPE-threads to execute 'SPU'. */
 	for (i = 0; i < SPU_THREADS; i++) {
 		/* Create context */
-		if ((ctxs[i] = spe_context_create (0, NULL)) == NULL) {
+		if ((ctxs[i] = spe_context_create (SPE_EVENTS_ENABLE, NULL)) == NULL) {
 			perror ("Failed creating context");
 			exit (1);
 		}
@@ -205,25 +216,50 @@ int main(int argc, char **argv)
 			perror ("Failed creating thread");
 			exit (1);
 		}
+		/* The type of the event(s) we are working with */
+		pevents[i].events = SPE_EVENT_OUT_INTR_MBOX;
+		pevents[i].spe = ctxs[i];
+		pevents[i].data.u32 = i; // just some data to pass
+
+		spe_event_handler_register(event_handler, &pevents[i]);
 	}
 
-	// Write mailbox entry: it's definetly one message per SPU so no need for blocking
+	/* Sending initial parameters and the first patch to each SPU */	
+	struct pixel *first_patch;
 	for (i = 0; i < SPU_THREADS; i++) {
-		spe_in_mbox_write(ctxs[i], (void*)&i, 1, SPE_MBOX_ANY_NONBLOCKING);
-		printf("[PPU] data sent to SPU# = %d\n",arg[i].data);
+		spe_in_mbox_write(ctxs[i], (void *) &rows, 1, 
+			SPE_MBOX_ANY_NONBLOCKING);
+		spe_in_mbox_write(ctxs[i], (void *) &patch_h, 1,
+			SPE_MBOX_ANY_NONBLOCKING);
+		spe_in_mbox_write(ctxs[i], (void *) &patch_w, 1,
+			SPE_MBOX_ANY_NONBLOCKING);
+		first_patch = get_random_patch(patches, pool_size);
+		int pointer = first_patch;
+		spe_in_mbox_write(ctxs[i], (void *)&pointer, 1,
+			SPE_MBOX_ANY_NONBLOCKING);	
 	}
 
 
-
-
-
-
-
-
-
-
-
-
+	/* Getting the offset of LS in data buffer
+	unsigned int data_pointer;
+	int ret=0,done=0;
+	for (;done<8; ret = spe_event_wait(event_handler, events_received,
+				1, 0)) {
+		// do useful stuff
+		if (ret == 0)
+			continue;
+		if (ret<0) {
+			printf("Error: event wait error\n");
+			continue;
+		}
+		if (events_received[0].events & SPE_EVENT_OUT_INTR_MBOX) {
+			printf("SPU%d sent me a message\n",events_received[0].data.u32);
+			// read the mailbox for the spe that issued the event
+			spe_out_intr_mbox_read(events_received[0].spe, (unsigned int*)&data_pointer, 1, SPE_MBOX_ANY_BLOCKING);
+			printf("SPU%d says: %d\n", events_received[0].data.u32, data_pointer);
+			done += 1;
+		}
+	}*/
 
 	/* Wait for SPU-thread to complete execution. */
 	for (i = 0; i < SPU_THREADS; i++) {
