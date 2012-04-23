@@ -176,7 +176,7 @@ int main(int argc, char **argv)
 			width, height);
 	if (patches == NULL) {
 		printf("Patches e null\n");
-		return;
+		return -1;
 	}
 	/* Print a patch from pool */
 	FILE *fout = fopen("23_out.ppm", "w");
@@ -234,7 +234,11 @@ int main(int argc, char **argv)
 		spe_in_mbox_write(ctxs[i], (void *) &patch_w, 1,
 			SPE_MBOX_ANY_NONBLOCKING);
 		first_patch = get_random_patch(patches, pool_size);
-		int pointer = first_patch;
+		printf("PPU sends to SPU %d: %d, %d, %d\n", i, 
+			first_patch[0].red, first_patch[0].green,
+			first_patch[0].blue);
+		int pointer = (int)first_patch;
+		//printf("PPU catre SPU %d, pointer %d\n", i, pointer);
 		spe_in_mbox_write(ctxs[i], (void *)&pointer, 1,
 			SPE_MBOX_ANY_NONBLOCKING);	
 	}
@@ -276,6 +280,6 @@ int main(int argc, char **argv)
 	}
 
 	printf("\nThe program has successfully executed.\n");
-	return(0);
+	return 0;
 }
 
