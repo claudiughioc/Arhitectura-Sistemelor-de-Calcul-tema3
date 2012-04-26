@@ -2,12 +2,14 @@
 #include <stdio.h>
 #include <errno.h>
 #include <libspe2.h>
+#include <libmisc.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <string.h>
 
 #define SPU_THREADS 	8
 #define NUMBER_TRIES	1
+#define FINISHED		0x08
 // macro for rounding input value to the next higher multiple of either 
 // 16 or 128 (to fulfill MFC's DMA requirements)
 #define spu_mfc_ceil128(value)  ((value + 127) & ~127)
@@ -33,7 +35,7 @@ void *ppu_pthread_function(void *thread_arg) {
 	unsigned int entry = SPE_DEFAULT_ENTRY;
 	if (spe_context_run(arg->spe, &entry, 0, (void *) arg->cellno, 
 				(void *) arg->data, NULL) < 0) {
-		perror ("Failed running context");
+		perror ("Failed runnnning context");
 		exit (1);
 	}
 
@@ -157,7 +159,7 @@ int main(int argc, char **argv)
 	int zoom, rows, columns, overlap_vert, overlap_oriz, pos_patch;
 	long height, width, i, j, k, petic_x, petic_y;
 	int max_color, patch_w, patch_h, pool_size, nevents;
-	struct pixel *a = NULL, *result = NULL;
+	struct pixel *a = NULL, *result = NULL, *final = NULL;
 	struct pixel **patches __attribute__ ((aligned(16))) = NULL;
 
 	/* Store the arguments */
@@ -177,8 +179,7 @@ int main(int argc, char **argv)
 	if (!fin)
 		perror("Error while opening input file for reading");
 	read_from_file(fin, &a, &width, &height, &max_color);
-	printf("Access some pixel: %d, %d, %d\n", a[183].red, a[183].green,
-			a[183].blue);
+	final = malloc_align(zoom * zoom * width * height * sizeof(struct pixel), 4);
 	printf("Successfuly read from file\n");
 
 	/* Create a pool of several random patches */
@@ -239,7 +240,11 @@ int main(int argc, char **argv)
 
 	/* Sending initial parameters and the first patch to each SPU */	
 	struct pixel *first_patch;
+	int spu_zone_pointer;
 	for (i = 0; i < SPU_THREADS; i++) {
+		spu_zone_pointer = &final[i * zoom * width * patch_h];
+		spe_in_mbox_write(ctxs[i], (void *) &spu_zone_pointer, 1, 
+			SPE_MBOX_ANY_NONBLOCKING);
 		spe_in_mbox_write(ctxs[i], (void *) &rows, 1, 
 			SPE_MBOX_ANY_NONBLOCKING);
 		spe_in_mbox_write(ctxs[i], (void *) &patch_h, 1,
@@ -281,6 +286,23 @@ int main(int argc, char **argv)
 			send_random_patch_to_spu(curr_spu_no, patches, pool_size,
 							ctxs);
 
+
+		
+
+	/* Received FINISHED signal from SPUs */
+	int signal;
+	printf("-----------Getting here----------\n");
+	for (i = 0; i < SPU_THREADS; i++) {
+	
+		nevents = spe_event_wait(event_handler, &event_received, 1, -1);
+		if (nevents <= 0)
+			continue;
+		while(spe_out_intr_mbox_status(event_received.spe) < 1);
+		spe_out_intr_mbox_read(event_received.spe, &signal, 1,
+			SPE_MBOX_ANY_NONBLOCKING);
+		if (signal != FINISHED)
+			printf("Message from a SPU which is not FINISH\n");
+	}
 
 
 	/* Wait for SPU-thread to complete execution. */
