@@ -68,7 +68,7 @@ void read_from_file(FILE *fin, struct pixel **a, long *width, long *height,
 					break;
 				*height = atol(tok);
 			};
-			*a = malloc(*width * *height * sizeof(struct pixel));
+			*a = malloc_align(*width * *height * sizeof(struct pixel), 4);
 			if (!*a) {
 				perror("Error on alocating matrix");
 				return;
@@ -106,11 +106,11 @@ struct pixel **build_pool_patches(int count, struct pixel *img, struct pixel **p
 	int i, j, k;
 	long rand_x, rand_y, pos_img, pos_patch;
 	srand(time(NULL));
-	pool = malloc(count * sizeof(struct pixel *));
+	pool = malloc_align(count * sizeof(struct pixel *), 4);
 	if (!pool)
 		return NULL;
 	for (i = 0; i < count; i++) {
-		pool[i] = malloc(patch_w * patch_h * sizeof(struct pixel));
+		pool[i] = malloc_align(patch_w * patch_h * sizeof(struct pixel), 4);
 		if (!pool[i]) {
 			free(pool);
 			return NULL;
@@ -180,7 +180,7 @@ int main(int argc, char **argv)
 		perror("Error while opening input file for reading");
 	read_from_file(fin, &a, &width, &height, &max_color);
 	final = malloc_align(zoom * zoom * width * height * sizeof(struct pixel), 4);
-	printf("Successfuly read from file\n");
+	printf("Imaginea finala e la pointer %x\n", final);
 
 	/* Create a pool of several random patches */
 	patch_w = width * zoom / columns;
@@ -188,6 +188,7 @@ int main(int argc, char **argv)
 	pool_size = rows * columns;
 	patches = build_pool_patches(pool_size, a, patches, patch_w, patch_h,
 			width, height);
+	printf("PPU patches e la pointer %x\n", patches);
 	if (patches == NULL) {
 		printf("Patches e null\n");
 		return -1;
@@ -243,6 +244,7 @@ int main(int argc, char **argv)
 	int spu_zone_pointer;
 	for (i = 0; i < SPU_THREADS; i++) {
 		spu_zone_pointer = &final[i * zoom * width * patch_h];
+		printf("PPU send to spu %d zone pointer %x\n", i, spu_zone_pointer);
 		spe_in_mbox_write(ctxs[i], (void *) &spu_zone_pointer, 1, 
 			SPE_MBOX_ANY_NONBLOCKING);
 		spe_in_mbox_write(ctxs[i], (void *) &rows, 1, 
@@ -291,7 +293,8 @@ int main(int argc, char **argv)
 
 	/* Received FINISHED signal from SPUs */
 	int signal;
-	printf("-----------Getting here----------\n");
+	printf("-----------Getting here----------sleep 5 min\n");
+	sleep(5);
 	for (i = 0; i < SPU_THREADS; i++) {
 	
 		nevents = spe_event_wait(event_handler, &event_received, 1, -1);

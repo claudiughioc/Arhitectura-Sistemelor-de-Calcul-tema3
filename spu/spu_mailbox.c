@@ -102,7 +102,7 @@ int main(unsigned long long speid, unsigned long long argp, unsigned long long e
 		place_patch_in_zone(i + 1, patch_h, patch_w, rows, argp);
 	}
 
-	/* Print the zone to an output file
+	/* Print the zone to an output file */
 	char file_name[6] = "f_out";
 	file_name[5] = (char) argp;
 	FILE *fout = fopen(file_name, "w");
@@ -112,21 +112,29 @@ int main(unsigned long long speid, unsigned long long argp, unsigned long long e
 			fprintf(fout, "%d\n%d\n%d\n", zone[i].red,
 					zone[i].green, zone[i].blue);
 	}
-	close(fout);*/
+	close(fout);
 
 	/* Send the final zone to the PPU */
 	int nr_pixel_transf = 2000, source = 0;
 	struct pixel *zone_pointer = zone;
 	while (zone_size > source * sizeof(struct pixel)) {
-		printf("SPU %lld will send to pointer %x\n", argp, final_pointer);
+		printf("SPU %lld will send from %x to pointer %x\n", 
+			argp,&zone[source], final_pointer);
 		sleep(1);
+		tag_id = mfc_tag_reserve();
+		if (tag_id == MFC_TAG_INVALID) {
+				printf("Cannot allocate tag id\n");
+				return -1;
+		}
 		mfc_put((void *)&zone[source], (void *)final_pointer,
 			(uint32_t) (nr_pixel_transf * sizeof(struct pixel)), tag_id, 0, 0);
+		printf("SPU %lld waiting for tag\n", argp);
 		waitag(tag_id);
-		sleep(1);
+		printf("SPU %lld passed the tag\n", argp);
 		final_pointer += 2000;
 		source += nr_pixel_transf;
 	}	
+	printf ("SPU %lld trimite FINISH\n", argp);
 	/* Send FINISHED to SPU */
 	spu_write_out_intr_mbox(FINISHED);
 	
