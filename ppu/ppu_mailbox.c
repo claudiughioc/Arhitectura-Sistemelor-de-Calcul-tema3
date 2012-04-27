@@ -10,6 +10,7 @@
 #define SPU_THREADS 	8
 #define NUMBER_TRIES	1
 #define FINISHED		0x08
+#define PIXELS_DMA		2000
 // macro for rounding input value to the next higher multiple of either 
 // 16 or 128 (to fulfill MFC's DMA requirements)
 #define spu_mfc_ceil128(value)  ((value + 127) & ~127)
@@ -159,7 +160,8 @@ int main(int argc, char **argv)
 	int zoom, rows, columns, overlap_vert, overlap_oriz, pos_patch;
 	long height, width, i, j, k, petic_x, petic_y;
 	int max_color, patch_w, patch_h, pool_size, nevents;
-	struct pixel *a = NULL, *result = NULL, *final = NULL;
+	struct pixel *a = NULL, *result = NULL; 
+	volatile struct pixel *final;;
 	struct pixel **patches __attribute__ ((aligned(16))) = NULL;
 
 	/* Store the arguments */
@@ -179,7 +181,6 @@ int main(int argc, char **argv)
 	if (!fin)
 		perror("Error while opening input file for reading");
 	read_from_file(fin, &a, &width, &height, &max_color);
-	final = malloc_align(zoom * zoom * width * height * sizeof(struct pixel), 4);
 	printf("Imaginea finala e la pointer %x\n", final);
 
 	/* Create a pool of several random patches */
@@ -193,7 +194,7 @@ int main(int argc, char **argv)
 		printf("Patches e null\n");
 		return -1;
 	}
-	/* Print a patch from pool */
+	/* Print a patch from pool
 	FILE *fout = fopen("23_out.ppm", "w");
 	fprintf(fout, "P3\n");
 	fprintf(fout, "%d %d\n%d\n", patch_w, patch_h, max_color);
@@ -204,7 +205,7 @@ int main(int argc, char **argv)
 			fprintf(fout,"%d\n%d\n%d\n", patch[pos_patch].red,
 					patch[pos_patch].green, patch[pos_patch].blue);
 		}
-	}
+	}*/
 
 
 	/* Create several SPE-threads to execute 'SPU'. */
@@ -242,8 +243,15 @@ int main(int argc, char **argv)
 	/* Sending initial parameters and the first patch to each SPU */	
 	struct pixel *first_patch;
 	int spu_zone_pointer;
+	char * vector = (char *)malloc_align(16, 4);
+	struct pixel *buffer = (struct pixel *)malloc_align(PIXELS_DMA *
+		sizeof(struct pixel), 4);
+	final = (struct pixel *)malloc_align(zoom * zoom * 
+		width * height * sizeof(struct pixel), 4);
 	for (i = 0; i < SPU_THREADS; i++) {
-		spu_zone_pointer = &final[i * zoom * width * patch_h];
+		//spu_zone_pointer = &final[i * zoom * width * patch_h];
+		spu_zone_pointer = &final[0];
+		//spu_zone_pointer = &buffer[0];
 		printf("PPU send to spu %d zone pointer %x\n", i, spu_zone_pointer);
 		spe_in_mbox_write(ctxs[i], (void *) &spu_zone_pointer, 1, 
 			SPE_MBOX_ANY_NONBLOCKING);
@@ -294,7 +302,6 @@ int main(int argc, char **argv)
 	/* Received FINISHED signal from SPUs */
 	int signal;
 	printf("-----------Getting here----------sleep 5 min\n");
-	sleep(5);
 	for (i = 0; i < SPU_THREADS; i++) {
 	
 		nevents = spe_event_wait(event_handler, &event_received, 1, -1);
@@ -307,6 +314,16 @@ int main(int argc, char **argv)
 			printf("Message from a SPU which is not FINISH\n");
 	}
 
+	/* Print the final image to an output file */
+	printf("PPU writing the final image to output file\n");
+	FILE *fout = fopen(output_file, "w");
+	fprintf(fout, "P3\n");
+	fprintf(fout, "%d %d\n%d\n", width * zoom, height * zoom, 255);
+	for (i = 0; i < zoom * zoom * width * height; i++) {
+			fprintf(fout, "%d\n%d\n%d\n", final[i].red,
+					final[i].green, final[i].blue);
+	}
+	close(fout);
 
 	/* Wait for SPU-thread to complete execution. */
 	for (i = 0; i < SPU_THREADS; i++) {

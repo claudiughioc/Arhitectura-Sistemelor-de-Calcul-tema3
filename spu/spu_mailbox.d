@@ -17,9 +17,10 @@ spu_mailbox.o spu_mailbox.i spu_mailbox.lst spu_mailbox.d : spu_mailbox.c \
   /usr/lib/gcc/spu/4.1.1/../../../../spu/include/machine/types.h \
   /usr/lib/gcc/spu/4.1.1/../../../../spu/include/sys/features.h \
   /usr/lib/gcc/spu/4.1.1/../../../../spu/include/sys/stdio.h \
+  $(CELL_TOP)/usr/spu/include/libmisc.h \
+  /usr/lib/gcc/spu/4.1.1/../../../../spu/include/stdint.h \
   /usr/lib/gcc/spu/4.1.1/include/spu_mfcio.h \
   /usr/lib/gcc/spu/4.1.1/include/spu_intrinsics.h \
   /usr/lib/gcc/spu/4.1.1/include/spu_internals.h \
-  /usr/lib/gcc/spu/4.1.1/../../../../spu/include/stdint.h \
   /usr/lib/gcc/spu/4.1.1/../../../../spu/include/string.h \
   /usr/lib/gcc/spu/4.1.1/../../../../spu/include/sys/string.h

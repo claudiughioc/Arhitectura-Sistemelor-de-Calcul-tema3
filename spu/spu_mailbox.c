@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <libmisc.h>
 #include <spu_mfcio.h>
 #include <string.h>
 
@@ -6,6 +7,7 @@
 #define BUFFER_SIZE 	3072
 #define NUMBER_TRIES	1
 #define FINISHED		0x08
+#define PIXELS_DMA		2000
 
 struct pixel {
 	char red;
@@ -38,7 +40,7 @@ void place_patch_in_zone(int offset,int patch_h, int patch_w,
 
 int main(unsigned long long speid, unsigned long long argp, unsigned long long envp){
 	//printf("\tStart SPU %lld\n", argp);
-	int pointer_patch, final_pointer, rows, patch_h, patch_w, i, j, k;
+	unsigned int pointer_patch, final_pointer, rows, patch_h, patch_w, i, j, k;
 
 	/* Wait for initial parameters and the first patch from SPU */
 	while(spu_stat_in_mbox() <= 0);
@@ -52,8 +54,8 @@ int main(unsigned long long speid, unsigned long long argp, unsigned long long e
 	//printf("SPU %lld am primit prin mailbox: rows %d, ph %d, pw%d\n", argp,
 	//	rows, patch_h, patch_w);
 	/* Allocate memory for patch and zone */
-	patch = malloc(patch_h * patch_w * sizeof(struct pixel));
-	zone = malloc(rows * patch_h * patch_w * sizeof(struct pixel));
+	patch = malloc_align(patch_h * patch_w * sizeof(struct pixel), 4);
+	zone = malloc_align(rows * patch_h * patch_w * sizeof(struct pixel), 4);
 	long zone_size = rows * patch_w * patch_h * sizeof(struct pixel);
 	printf("SPU %lld sizeof(zone) = %ld\n", argp, zone_size);
 	while(spu_stat_in_mbox() <= 0);
@@ -87,11 +89,6 @@ int main(unsigned long long speid, unsigned long long argp, unsigned long long e
 		pointer_patch = spu_read_in_mbox();
 		
 		/* DMA transfer */
-		tag_id = mfc_tag_reserve();
-		if (tag_id == MFC_TAG_INVALID) {
-				printf("Cannot allocate tag id\n");
-				return -1;
-		}
 		mfc_get((void *)(patch), (void *)pointer_patch,
 						(uint32_t) patch_h * patch_w * sizeof(struct pixel), tag_id, 0, 0);
 		waitag(tag_id);
@@ -115,24 +112,17 @@ int main(unsigned long long speid, unsigned long long argp, unsigned long long e
 	close(fout);
 
 	/* Send the final zone to the PPU */
-	int nr_pixel_transf = 2000, source = 0;
-	struct pixel *zone_pointer = zone;
+	int source = 0;
 	while (zone_size > source * sizeof(struct pixel)) {
 		printf("SPU %lld will send from %x to pointer %x\n", 
 			argp,&zone[source], final_pointer);
-		sleep(1);
-		tag_id = mfc_tag_reserve();
-		if (tag_id == MFC_TAG_INVALID) {
-				printf("Cannot allocate tag id\n");
-				return -1;
-		}
 		mfc_put((void *)&zone[source], (void *)final_pointer,
-			(uint32_t) (nr_pixel_transf * sizeof(struct pixel)), tag_id, 0, 0);
-		printf("SPU %lld waiting for tag\n", argp);
+			(uint32_t) PIXELS_DMA * sizeof(struct pixel), tag_id, 0, 0);
 		waitag(tag_id);
 		printf("SPU %lld passed the tag\n", argp);
-		final_pointer += 2000;
-		source += nr_pixel_transf;
+		final_pointer += PIXELS_DMA;
+		source += PIXELS_DMA;
+		break;
 	}	
 	printf ("SPU %lld trimite FINISH\n", argp);
 	/* Send FINISHED to SPU */
