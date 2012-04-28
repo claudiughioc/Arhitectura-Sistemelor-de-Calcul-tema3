@@ -11,10 +11,12 @@
 #define NUMBER_TRIES	1
 #define FINISHED		0x08
 #define PIXELS_DMA		2000
-
+// macro for rounding input value to the next higher multiple of either 
+// 16 or 128 (to fulfill MFC's DMA requirements)
 #define spu_mfc_ceil128(value)  ((value + 127) & ~127)
 #define spu_mfc_ceil16(value)   ((value +  15) &  ~15)
 
+volatile char str[256]  __attribute__ ((aligned(16)));
 extern spe_program_handle_t spu_mailbox;
 
 typedef struct {
@@ -41,7 +43,6 @@ void *ppu_pthread_function(void *thread_arg) {
 	pthread_exit(NULL);
 }
 
-
 void read_from_file(FILE *fin, struct pixel **a, long *width, long *height,
 		int *max_color)
 {
@@ -50,17 +51,14 @@ void read_from_file(FILE *fin, struct pixel **a, long *width, long *height,
 	long line_no = 0, i = 0;
 
 	while(fgets(line, sizeof(line), fin) != NULL) {
-
 		/* Exclude comments */
 		if (line[0] == '#')
 			continue;
-
 		/* Check if the file is ppm */
 		if (!line_no && strncmp(line, "P3", 2)) {
 			perror("The input file is not ppm");
 			return;
 		}
-
 		line_no++;
 		if (line_no == 2) {
 			numbers = strtok(line, " ");
@@ -77,8 +75,11 @@ void read_from_file(FILE *fin, struct pixel **a, long *width, long *height,
 				return;
 			}
 		}
-		if (line_no == 3)
+		if (line_no == 3) {
 			*max_color = atoi(line);
+			printf("Width = %ld, height = %ld, ", *width, *height);
+			printf("Max color = %d\n", *max_color);
+		}
 		/* Read the RGB values */
 		if (line_no > 3) {
 			if (i % 3 == 0)
@@ -92,8 +93,6 @@ void read_from_file(FILE *fin, struct pixel **a, long *width, long *height,
 	}
 }
 
-
-
 /* Return a random path from the pool of patches */
 struct pixel *get_random_patch(struct pixel**pool, int pool_size)
 {
@@ -101,14 +100,13 @@ struct pixel *get_random_patch(struct pixel**pool, int pool_size)
 	return pool[pos];
 }
 
-/* Build a group of random chosen patches */
 struct pixel **build_pool_patches(int count, struct pixel *img, struct pixel **pool,
 		int patch_w, int patch_h, int img_w, int img_h)
 {
+	printf("Building pool patches, h %d, w%d\n", patch_h, patch_w);
 	int i, j, k;
 	long rand_x, rand_y, pos_img, pos_patch;
 	srand(time(NULL));
-	/* Allocate aligned memory for pool */
 	pool = malloc_align(count * sizeof(struct pixel *), 4);
 	if (!pool)
 		return NULL;
@@ -118,14 +116,16 @@ struct pixel **build_pool_patches(int count, struct pixel *img, struct pixel **p
 			free(pool);
 			return NULL;
 		}
-		/* Select a random position from initial image */
+		//printf("Successfuly allocated patch %d\n", i);
 		rand_x = rand() % (img_h - patch_h);
 		rand_y = rand() % (img_w - patch_w);		
-		/* Copy the pixels in the patch */
+		//printf("Patch starts at %ld, %ld\n", rand_x, rand_y);
 		for (j = 0; j < patch_h; j++) {
 			for (k = 0; k < patch_w; k++) {
 				pos_img = (rand_x + j) * img_w + rand_y + k;
 				pos_patch = j * patch_w + k;
+				//printf("Copy pixel from img[%d] to patch[%d]\n",
+				//	pos_img, pos_patch);
 				pool[i][pos_patch] = img[pos_img];
 			}
 		}
@@ -133,17 +133,16 @@ struct pixel **build_pool_patches(int count, struct pixel *img, struct pixel **p
 	return pool;
 }
 
-/* Gets a random patch from the pool and sends it to SPU */
+
 void send_random_patch_to_spu(int spu_no, struct pixel **patches, int pool_size,
 	spe_context_ptr_t *ctxs)
 {
 	struct pixel *curr_patch = get_random_patch(patches, pool_size);
+	printf("PPU is sending patch to SPU %d, pixel%d %d %d\n", spu_no,
+		curr_patch[0].red, curr_patch[0].green, curr_patch[0].blue);
 	int pointer = curr_patch;
-	printf("Before seg\n");
-	printf("PPU send to %d pointer %ld\n", spu_no, pointer);
-	spe_in_mbox_write(ctxs[spu_no], (void *)&pointer, 
-		1, SPE_MBOX_ANY_NONBLOCKING);
-		printf("After seg\n");
+	spe_in_mbox_write(ctxs[spu_no], (void *)&pointer, 1,
+		SPE_MBOX_ANY_NONBLOCKING);
 }
 
 
@@ -163,6 +162,7 @@ int main(int argc, char **argv)
 	int max_color, patch_w, patch_h, pool_size, nevents;
 	struct pixel *a = NULL, *result = NULL; 
 	struct pixel **patches __attribute__ ((aligned(16))) = NULL;
+	
 
 	/* Store the arguments */
 	if (argc < 8)
@@ -176,13 +176,11 @@ int main(int argc, char **argv)
 	overlap_oriz = atoi(argv[7]);
 
 
-
 	/* Read the matrix */
 	FILE *fin = fopen(input_file, "r");
 	if (!fin)
 		perror("Error while opening input file for reading");
 	read_from_file(fin, &a, &width, &height, &max_color);
-
 
 	/* Create a pool of several random patches */
 	patch_w = width * zoom / columns;
@@ -195,7 +193,6 @@ int main(int argc, char **argv)
 		printf("Patches e null\n");
 		return -1;
 	}
-
 
 
 	/* Create several SPE-threads to execute 'SPU'. */
@@ -267,6 +264,7 @@ int main(int argc, char **argv)
 	}
 
 
+
 	/* Send random patches to fill a column in SPU */
 	int repeats = (columns - 1) * NUMBER_TRIES * SPU_THREADS, curr_spu_no = -1;
 	for (i = 0; i < repeats; i++) {
@@ -274,10 +272,9 @@ int main(int argc, char **argv)
 		nevents = spe_event_wait(event_handler, &event_received, 1, -1);
 
 		/* Processing */
-		printf("Before seg\n");
-		if (curr_spu_no != -1 && curr_spu_no < SPU_THREADS)
-			send_random_patch_to_spu(curr_spu_no, patches, pool_size, ctxs);
-		printf("After seg\n");
+		if (curr_spu_no != -1)
+			send_random_patch_to_spu(curr_spu_no, patches, pool_size,
+				ctxs);
 
 		if (nevents <= 0)
 			continue;
@@ -296,7 +293,7 @@ int main(int argc, char **argv)
 
 	/* Received FINISHED signal from SPUs */
 	int signal;
-	printf("-----------Waiting for SPU to finish----------s\n");
+	printf("-----------Waiting for finish signal from SPU\n");
 	for (i = 0; i < SPU_THREADS; i++) {
 	
 		nevents = spe_event_wait(event_handler, &event_received, 1, -1);
