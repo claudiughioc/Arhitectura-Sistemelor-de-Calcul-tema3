@@ -10,6 +10,7 @@
 #define SPU_THREADS 	8
 #define NUMBER_TRIES	1
 #define FINISHED		0x08
+#define OK				0x0a
 #define PIXELS_DMA		2000
 // macro for rounding input value to the next higher multiple of either 
 // 16 or 128 (to fulfill MFC's DMA requirements)
@@ -283,11 +284,18 @@ int main(int argc, char **argv)
 			SPE_MBOX_ANY_NONBLOCKING);
 		printf("PPU am primit request de la SPU %d\n", curr_spu_no);
 	}
+
+	
 	/* Processing the last requesti */
 	if (curr_spu_no != -1)
 			send_random_patch_to_spu(curr_spu_no, patches, pool_size,
 							ctxs);
-
+	/* Receive final data from SPU */
+	for (i = 0; i < SPU_THREADS; i++) {
+		int data = OK;	
+		spe_in_mbox_write(ctxs[i], (void *) &data, 1, 
+			SPE_MBOX_ANY_NONBLOCKING);
+	}
 
 		
 

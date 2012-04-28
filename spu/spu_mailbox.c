@@ -7,6 +7,7 @@
 #define BUFFER_SIZE 	3072
 #define NUMBER_TRIES	1
 #define FINISHED		0x08
+#define OK				0x0a
 #define PIXELS_DMA		2000
 
 struct pixel {
@@ -89,6 +90,11 @@ int main(unsigned long long speid, unsigned long long argp, unsigned long long e
 		pointer_patch = spu_read_in_mbox();
 		
 		/* DMA transfer */
+		tag_id = mfc_tag_reserve();
+		if (tag_id == MFC_TAG_INVALID) {
+				printf("\tSPU Cannot allocate tag id\n");
+				return -1;
+		}
 		mfc_get((void *)(patch), (void *)pointer_patch,
 						(uint32_t) patch_h * patch_w * sizeof(struct pixel), tag_id, 0, 0);
 		waitag(tag_id);
@@ -99,16 +105,14 @@ int main(unsigned long long speid, unsigned long long argp, unsigned long long e
 		place_patch_in_zone(i + 1, patch_h, patch_w, columns, argp);
 	}
 
-	/* Print the zone to an output file */
-	char file_name[6] = "f_out";
-	FILE *fout = fopen(file_name, "w");
-	fprintf(fout, "P3\n");
-	fprintf(fout, "%d %d\n%d\n", patch_w * columns, patch_h, 255);
-	for (i = 0; i < columns * patch_h * patch_w; i++) {
-			fprintf(fout, "%d\n%d\n%d\n", zone[i].red,
-					zone[i].green, zone[i].blue);
+
+	/* Wait for signal from PPU to send final data */
+	while(spu_stat_in_mbox() <= 0);
+	int message = spu_read_in_mbox();
+	if (message != OK) {
+		printf("SPU %lld got something else than OK\n", argp);
+		return -1;
 	}
-	close(fout);
 
 	/* Send the final zone to the PPU */
 	int source = 0, transfer_size = PIXELS_DMA * sizeof(struct pixel);;
