@@ -18,49 +18,43 @@ struct pixel {
 struct pixel *patch __attribute__ ((alligned(16)));
 struct pixel *zone __attribute__ ((alligned(16)));
 
-volatile char buffer[BUFFER_SIZE] __attribute__ ((aligned(128)));
 
-void place_patch_in_zone(int offset,int patch_h, int patch_w,
-			int rows, unsigned long long argp)
+
+/* Places a patch received from the PPU at a certain offset */
+void place_patch_in_zone(int offset, int patch_h, int patch_w, int columns)
 {
 	int i = 0, j, k;
-	//printf("SPU %lld Height %d, width %d\n", argp, patch_h, patch_w);
 	for (i = 0; i < patch_h; i++) {
 		k = i * patch_w;
-		j = k * rows + offset * patch_w;
-		//printf("SPU %lld Iau de la %d din patch si dau la %d in zone\n",
-		//	 argp, k, j);
+		j = k * columns + offset * patch_w;
 		memcpy((void *)&zone[j], (const void *)&patch[k],
 			patch_w * sizeof(struct pixel));
-		//printf("SPU %lld zone are la %d pixel %d, %d, %d\n", argp, j,
-		//	zone[j].red, zone[j].green, zone[j].blue);
 	}
-
 }
 
-int main(unsigned long long speid, unsigned long long argp, unsigned long long envp){
-	//printf("\tStart SPU %lld\n", argp);
-	unsigned int pointer_patch, final_pointer, rows, patch_h, patch_w, i, j, k;
+
+int main(unsigned long long speid, unsigned long long argp,
+	unsigned long long envp)
+{
+	int pointer_patch, final_pointer, columns, patch_h, patch_w, i;
 
 	/* Wait for initial parameters and the first patch from SPU */
 	while(spu_stat_in_mbox() <= 0);
 	final_pointer = spu_read_in_mbox();
 	while(spu_stat_in_mbox() <= 0);
-	rows = spu_read_in_mbox();
+	columns = spu_read_in_mbox();
 	while(spu_stat_in_mbox() <= 0);
 	patch_h = spu_read_in_mbox();
 	while(spu_stat_in_mbox() <= 0);
 	patch_w = spu_read_in_mbox();
-	//printf("SPU %lld am primit prin mailbox: rows %d, ph %d, pw%d\n", argp,
-	//	rows, patch_h, patch_w);
+
 	/* Allocate memory for patch and zone */
 	patch = malloc_align(patch_h * patch_w * sizeof(struct pixel), 4);
-	zone = malloc_align(rows * patch_h * patch_w * sizeof(struct pixel), 4);
-	long zone_size = rows * patch_w * patch_h * sizeof(struct pixel);
-	printf("SPU %lld sizeof(zone) = %ld\n", argp, zone_size);
+	zone = malloc_align(columns * patch_h * patch_w * sizeof(struct pixel), 4);
+	long zone_size = columns * patch_w * patch_h * sizeof(struct pixel);
+
 	while(spu_stat_in_mbox() <= 0);
 	pointer_patch = spu_read_in_mbox();
-	//printf("SPU %lld primeste pointer %d\n", argp, pointer_patch);
 
 
 	/* Read the first patch */
@@ -73,58 +67,50 @@ int main(unsigned long long speid, unsigned long long argp, unsigned long long e
 		(uint32_t) patch_h * patch_w * sizeof(struct pixel), tag_id, 0, 0);
 	waitag(tag_id);
 	
-	/* Attach the first patch */
-	place_patch_in_zone(0, patch_h, patch_w, rows, argp);
 
+	/* Attach the first patch */
+	place_patch_in_zone(0, patch_h, patch_w, columns);
 
 
 	/* Send requests to receive the rest of the patches */
-	int repeats = (rows - 1) * NUMBER_TRIES, position = patch_h	* patch_w;
+	int repeats = (columns - 1) * NUMBER_TRIES;
 	for (i = 0; i < repeats; i++) {
-		//printf("\tSPU %lld trimite request nr %d\n", argp, i);
+		/* Send the index of the SPU */
+		printf("SPU%lld sends request\n", argp);
 		spu_write_out_intr_mbox((uint32_t)argp);
 
 		/* Waiting for the pointer to the next patch */
 		while(spu_stat_in_mbox() <= 0);
 		pointer_patch = spu_read_in_mbox();
 		
-		/* DMA transfer */
+		/* DMA transfer from main memory to LS*/
 		mfc_get((void *)(patch), (void *)pointer_patch,
-						(uint32_t) patch_h * patch_w * sizeof(struct pixel), tag_id, 0, 0);
+			(uint32_t) patch_h * patch_w * sizeof(struct pixel), tag_id, 0, 0);
 		waitag(tag_id);
-		//printf("\tSPU %lld primeste patch nr %d, pixel %d %d %d\n", argp, i,
-		//	patch[0].red, patch[0].green, patch[0].blue);
 
 		/* Put the patch in the zone */
-		place_patch_in_zone(i + 1, patch_h, patch_w, rows, argp);
+		place_patch_in_zone(i + 1, patch_h, patch_w, columns);
 	}
 
-	/* Print the zone to an output file */
-	char file_name[6] = "f_out";
-	file_name[5] = (char) argp;
-	FILE *fout = fopen(file_name, "w");
-	fprintf(fout, "P3\n");
-	fprintf(fout, "%d %d\n%d\n", patch_w * rows, patch_h, 255);
-	for (i = 0; i < rows * patch_h * patch_w; i++) {
-			fprintf(fout, "%d\n%d\n%d\n", zone[i].red,
-					zone[i].green, zone[i].blue);
-	}
-	close(fout);
 
 	/* Send the final zone to the PPU */
-	int source = 0;
-	while (zone_size > source * sizeof(struct pixel)) {
-		printf("SPU %lld will send from %x to pointer %x\n", 
-			argp,&zone[source], final_pointer);
+	int source = 0, transfer_size = PIXELS_DMA * sizeof(struct pixel);;
+	while (zone_size > PIXELS_DMA * sizeof(struct pixel)) {
+		
+		/* Adjust the transfer size when reachind end of transfer*/
+		if (zone_size < 2 * transfer_size)
+			transfer_size = zone_size; 
+
 		mfc_put((void *)&zone[source], (void *)final_pointer,
-			(uint32_t) PIXELS_DMA * sizeof(struct pixel), tag_id, 0, 0);
+			(uint32_t) transfer_size, tag_id, 0, 0);
 		waitag(tag_id);
-		printf("SPU %lld passed the tag\n", argp);
-		final_pointer += PIXELS_DMA;
+
+		final_pointer += PIXELS_DMA * 3;
 		source += PIXELS_DMA;
-		break;
+		zone_size -= PIXELS_DMA * sizeof(struct pixel);
 	}	
-	printf ("SPU %lld trimite FINISH\n", argp);
+
+
 	/* Send FINISHED to SPU */
 	spu_write_out_intr_mbox(FINISHED);
 	
