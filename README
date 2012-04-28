@@ -1,0 +1,24 @@
+GHIOC CONSTANTIN CLAUDIU 331CB
+
+TEMA 3 ASC          SINTEZA TEXTURILOR
+
+    1. CERINTA
+    Implementarea algoritmului Image Quilting pe arhitectura CELL;
+
+    2.  DETALII IMPLEMENTARE:
+    Am implementat varianta banala, cu petice alese random, si puse unul dupa altul in zona la SPU.
+    La rularea aplicatiei PPU-ul initial construieste o multime de petice (egala cu numarul de SPU-uri ori numarul de coloane) din care va trimite tot in 
+mod aleator catre SPU. Initial, acesta trimite o serie de parametri printre care: pointerul la zona de memorie unde SPU-ul va intoarce rezultatul 
+sau final (o fasie orizontala), numarul de coloane si dimensiunea unui petic, calculata in functie de dimensiunile imaginii initiale, de zoom si 
+numarul de coloane. Apoi, PPU-ul trimite catre fiecare SPU un petic, pe care acestea il vor aseza la inceputul fasiei lor.
+    Dupa trimiterea parametrilor initiali, PPU-ul asteapta requesturi de la SPU pentru a le trimite restul de petice din multimea creata. SPU-uri trimit 
+prin mailbox id-ul lor sub forma de cerere, iar PPU-ul trimit inapoi peticele, pana cand se completeaza toate zonele. Dupa ce SPU-urile si-au construit zonele, 
+ele vor trimite la pointerul primit initial fasia construita (prin DMA din LocalStore in main memory). La sfarsit SPU-urile informeaza PPU-ul ca au terminat
+printr-un mesaj FINISH, moment in care PPU-ul afiseaza in ordine in fisier datele primite.
+
+    Comunicatia prin mailbox a fost implementat in PPU cu ajutorul event handler. 
+
+    3.  PROBLEME INTAMPINATE
+    La unele executii PPU primeste prin mailbox de la SPU id-ul 8, cu toate ca id-urile SPU-urilor se incadreaza intre 0 si 7, lucru ce genereaza Segmentation
+fault. La o rulare cu succes, imaginea finala consta in peticele unite.
+    
